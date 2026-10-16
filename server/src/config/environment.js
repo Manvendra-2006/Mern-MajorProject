@@ -15,7 +15,7 @@ const config = {
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
   cookieMaxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in ms
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5173',
-  mailMode: (process.env.MAIL_MODE || 'smtp').trim().toLowerCase(),
+  mailMode: (process.env.MAIL_MODE?.trim().toLowerCase() || (process.env.SMTP_HOST ? 'smtp' : 'ethereal')),
   smtp: {
     host: process.env.SMTP_HOST || '',
     port: Number.isNaN(smtpPort) ? 587 : smtpPort,
