@@ -1,141 +1,117 @@
-const nodemailer = require('nodemailer');
+
+const { Resend } = require('resend');
 const config = require('./environment');
 
-let transporter = null;
+const resend = new Resend(process.env.RESEND_API_KEY);
 
-const initializeEtherealTransporter = async () => {
-  try {
-    const testAccount = await nodemailer.createTestAccount();
-    transporter = nodemailer.createTransport({
-      host: testAccount.smtp.host,
-      port: testAccount.smtp.port,
-      secure: testAccount.smtp.secure,
-      auth: {
-        user: testAccount.user,
-        pass: testAccount.pass,
-      },
-    });
-    console.log('[Mailer] Initialized explicitly requested Ethereal test mailer.');
-    try {
-      await transporter.verify();
-      console.log('[Mailer] Ethereal transporter verified – ready to send.');
-    } catch (e) {
-      console.error('[Mailer] Ethereal transporter verification failed:', e);
-    }
-    return transporter;
-  } catch {
-    console.error('[Mailer] Could not initialize the explicitly requested Ethereal test mailer.');
-    throw new Error('Could not initialize the Ethereal test mailer.');
-  }
-};
+const escapeHtml = (value) =>
+  String(value).replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  })[char]);
 
-const initializeSmtpTransporter = async () => {
-  const { host, port, user, pass } = config.smtp;
-  if (!host || !user || !pass) {
-    console.error('[Mailer] SMTP configuration is incomplete. Set SMTP_HOST, SMTP_USER, and SMTP_PASS.');
-    throw new Error('SMTP configuration is incomplete.');
+const sendOtpEmail = async (
+  email,
+  otp,
+  purpose = 'verification'
+) => {
+  if (!process.env.RESEND_API_KEY) {
+    throw new Error('RESEND_API_KEY is not configured.');
   }
 
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    console.error('[Mailer] SMTP_PORT must be a valid port number.');
-    throw new Error('SMTP_PORT must be a valid port number.');
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new Error('A valid recipient email is required.');
   }
 
-  const isGmail = host.toLowerCase() === 'smtp.gmail.com';
-  if (isGmail && port !== 465 && port !== 587) {
-    console.error('[Mailer] Gmail SMTP requires port 465 or 587.');
-    throw new Error('Gmail SMTP requires port 465 or 587.');
+  if (!/^\d{6}$/.test(String(otp))) {
+    throw new Error('OTP must be a 6-digit code.');
   }
+
+  const isReset = purpose === 'reset';
+
+  const title = isReset
+    ? 'Password Reset Code'
+    : 'Email Verification Code';
+
+  const description = isReset
+    ? 'Use this code to reset your EcoQuest password.'
+    : 'Use this code to verify your EcoQuest email address.';
+
+  const safeOtp = escapeHtml(otp);
 
   try {
-    transporter = nodemailer.createTransport({
-      host,
-      port,
-      secure: port === 465,
-      requireTLS: port === 587,
-      auth: { user, pass },
-    });
-    // Verify SMTP transporter
-    await transporter.verify();
-    console.log('[Mailer] SMTP transporter verified – ready to send.');
-    return transporter;
-  } catch (e) {
-    console.error('[Mailer] Could not initialize the configured SMTP transport or verify it:', e);
-    throw new Error('Could not initialize the configured SMTP transport.');
-  }
-};
+    const { data, error } = await resend.emails.send({
+      from:
+        process.env.RESEND_FROM ||
+        'EcoQuest <onboarding@resend.dev>',
 
-const getTransporter = async () => {
-  if (transporter) return transporter;
+      to: [email],
 
-  if (config.mailMode === 'ethereal') {
-    return initializeEtherealTransporter();
-  }
+      subject: `EcoQuest - ${title}`,
 
-  if (config.mailMode !== 'smtp') {
-    console.error('[Mailer] MAIL_MODE must be either "smtp" or "ethereal".');
-    throw new Error('MAIL_MODE must be either "smtp" or "ethereal".');
-  }
+      text: [
+        title,
+        '',
+        description,
+        '',
+        `Your verification code is: ${otp}`,
+        'This code expires in 5 minutes.',
+        'If you did not request this code, ignore this email.',
+      ].join('\n'),
 
-  return initializeSmtpTransporter();
-};
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:24px;border:1px solid #e2e8f0;border-radius:12px;">
+          <h2 style="color:#15803d;text-align:center;">EcoQuest</h2>
+          <h3>${title}</h3>
+          <p>${description}</p>
 
-/**
- * Send an OTP Email securely without logging secrets.
- */
-const sendOtpEmail = async (email, otp, purpose = 'verification') => {
-  const mailTransporter = await getTransporter();
-
-  const title = purpose === 'reset' ? 'Password Reset Code' : 'Email Verification Code';
-  const description = purpose === 'reset'
-    ? 'Use the 6-digit code below to reset your EcoQuest account password.'
-    : 'Welcome to EcoQuest! Use the 6-digit code below to verify your email address.';
-
-  const mailOptions = {
-    from: config.smtp.from,
-    to: email,
-    subject: `EcoQuest — ${title}`,
-    text: `${title}\n\n${description}\n\nYour 6-digit code is: ${otp}\n\nThis code will expire in 5 minutes. If you did not request this code, please ignore this email.`,
-    html: `
-      <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;">
-        <div style="text-align: center; margin-bottom: 24px;">
-          <h2 style="color: #15803d; margin: 0; font-size: 24px;">🌿 EcoQuest</h2>
-          <p style="color: #64748b; font-size: 14px; margin-top: 4px;">Gamified Environmental Education</p>
-        </div>
-        <div style="padding: 20px; background-color: #f0fdf4; border-radius: 8px; border-left: 4px solid #16a34a; margin-bottom: 20px;">
-          <h3 style="margin-top: 0; color: #166534; font-size: 18px;">${title}</h3>
-          <p style="color: #334155; font-size: 14px; line-height: 1.5;">${description}</p>
-          <div style="text-align: center; margin: 24px 0;">
-            <span style="display: inline-block; font-size: 32px; font-weight: bold; letter-spacing: 8px; color: #15803d; background: #ffffff; padding: 12px 24px; border: 2px dashed #86efac; border-radius: 8px;">
-              ${otp}
+          <div style="padding:20px;text-align:center;background:#f0fdf4;border-radius:8px;">
+            <span style="font-size:32px;font-weight:bold;letter-spacing:8px;color:#15803d;">
+              ${safeOtp}
             </span>
           </div>
-          <p style="color: #64748b; font-size: 12px; margin-bottom: 0;">⏱️ This verification code expires in <strong>5 minutes</strong>. Never share this code with anyone.</p>
-        </div>
-        <p style="color: #94a3b8; font-size: 12px; text-align: center;">If you did not initiate this request, you can safely ignore this email.</p>
-      </div>
-    `,
-  };
 
-  try {
-    const info = await mailTransporter.sendMail(mailOptions);
-    const previewUrl = config.mailMode === 'ethereal' ? nodemailer.getTestMessageUrl(info) : undefined;
-    if (previewUrl) {
-      console.log(`[Mailer] Development email preview delivered: ${previewUrl}`);
-    } else {
-      console.log(`[Mailer] Email delivered to recipient safely.`);
+          <p>This code expires in 5 minutes. Never share it with anyone.</p>
+          <p>If you did not request this code, ignore this email.</p>
+        </div>
+      `,
+    });
+
+    if (error) {
+      console.error('[Mailer] Resend API error:', {
+        name: error.name,
+        message: error.message,
+        statusCode: error.statusCode,
+      });
+
+      throw new Error('Email provider rejected the request.');
     }
-    return { success: true, messageId: info.messageId, previewUrl };
-  } catch {
-    const message = config.mailMode === 'smtp'
-      ? '[Mailer Error] SMTP delivery failed. Verify SMTP_HOST, SMTP_PORT, SMTP_USER, and SMTP_PASS.'
-      : '[Mailer Error] Failed to send email via the configured mail transport.';
-    console.error(message);
-    throw new Error('Failed to send verification email. Please try again later.');
+
+    console.log('[Mailer] Resend accepted the email request:', {
+      id: data?.id,
+      recipient: email,
+    });
+
+    return {
+      success: true,
+      messageId: data?.id,
+    };
+  } catch (error) {
+    console.error('[Mailer] Email API request failed:', {
+      name: error.name,
+      message: error.message,
+      statusCode: error.statusCode,
+    });
+
+    throw new Error(
+      'Failed to send verification email. Please try again later.'
+    );
   }
 };
 
 module.exports = {
-  getTransporter,
   sendOtpEmail,
 };
