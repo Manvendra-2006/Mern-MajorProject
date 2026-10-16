@@ -16,6 +16,12 @@ const initializeEtherealTransporter = async () => {
       },
     });
     console.log('[Mailer] Initialized explicitly requested Ethereal test mailer.');
+    try {
+      await transporter.verify();
+      console.log('[Mailer] Ethereal transporter verified – ready to send.');
+    } catch (e) {
+      console.error('[Mailer] Ethereal transporter verification failed:', e);
+    }
     return transporter;
   } catch {
     console.error('[Mailer] Could not initialize the explicitly requested Ethereal test mailer.');
@@ -23,7 +29,7 @@ const initializeEtherealTransporter = async () => {
   }
 };
 
-const initializeSmtpTransporter = () => {
+const initializeSmtpTransporter = async () => {
   const { host, port, user, pass } = config.smtp;
   if (!host || !user || !pass) {
     console.error('[Mailer] SMTP configuration is incomplete. Set SMTP_HOST, SMTP_USER, and SMTP_PASS.');
@@ -49,9 +55,12 @@ const initializeSmtpTransporter = () => {
       requireTLS: port === 587,
       auth: { user, pass },
     });
+    // Verify SMTP transporter
+    await transporter.verify();
+    console.log('[Mailer] SMTP transporter verified – ready to send.');
     return transporter;
-  } catch {
-    console.error('[Mailer] Could not initialize the configured SMTP transport.');
+  } catch (e) {
+    console.error('[Mailer] Could not initialize the configured SMTP transport or verify it:', e);
     throw new Error('Could not initialize the configured SMTP transport.');
   }
 };
