@@ -25,13 +25,26 @@ const app = express();
 // Security HTTP Headers
 app.use(helmet());
 
-// Credentialed CORS
+// Credentialed CORS with explicit allowlist for production and development
+// Credentialed CORS with explicit allowlist for production and development
 app.use(
   cors({
-    origin: config.frontendUrl,
+    origin: (origin, callback) => {
+      // Allow same‑origin (no Origin header) or whitelisted origins
+      if (!origin) return callback(null, true);
+      const allowedOrigins = [
+        config.frontendUrl,
+        'https://mern-major-project-2ywetbacn-manvendra-bhardwajs-projects.vercel.app',
+      ];
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      const msg = 'CORS policy does not allow this origin.';
+      return callback(new Error(msg), false);
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X‑Requested‑With'],
   })
 );
 
